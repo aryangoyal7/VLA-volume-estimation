@@ -111,6 +111,13 @@ Generate these from your DINOv3 pipeline first, then run the batch eval here.
 
 Detailed workflow: `LANGSAM_DINOV3_EXPERIMENT.md`
 
+## Included image datasets
+
+This repo now includes the image-only subsets from your previous project:
+
+- `datasets/spectralwaste/` (5 images)
+- `datasets/zero_dataset/` (4 images)
+
 ## Library usage
 
 ```python
