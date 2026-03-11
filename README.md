@@ -104,6 +104,19 @@ With ground truth:
 
 This computes MAE/RMSE/MAPE/R2 for volume and optional mass.
 
+### 4) Notebook (hardcoded path + prompt)
+
+Use:
+
+- `notebooks/vla_inference.ipynb`
+
+It has a single config cell where you hardcode:
+
+- `image_path`
+- `prompt`
+- optional `depth_path`
+- thresholds and density
+
 ## DINOv3 depth notes
 
 This repo consumes aligned depth maps (`*_depth_raw.png`).  
