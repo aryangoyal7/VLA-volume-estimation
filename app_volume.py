@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 from torchvision import transforms
 
-from lang_sam import LangSAM, SAM_MODELS
+from lang_sam import LangSAM
 from lang_sam.utils import draw_image
 
 
@@ -39,9 +39,25 @@ PRESET_TARGET_GROUND_DEPTH_M: Optional[float] = None
 PRESET_DEPTH_SCALE_FACTOR = 10000.0
 
 # DINOv3 depth presets (override via environment variables)
-PRESET_DINOV3_REPO_DIR = os.getenv("DINOV3_REPO_DIR", "")
+def _autodetect_dinov3_repo() -> str:
+    """Best-effort local DINOv3 repo detection (for torch.hub source='local')."""
+    candidates = [
+        os.getenv("DINOV3_REPO_DIR", ""),
+        os.path.abspath(os.path.dirname(__file__)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+    ]
+    for cand in candidates:
+        if not cand:
+            continue
+        if os.path.isfile(os.path.join(cand, "hubconf.py")) and os.path.isdir(os.path.join(cand, "dinov3")):
+            return cand
+    return ""
+
+
+PRESET_DINOV3_REPO_DIR = _autodetect_dinov3_repo()
+PRESET_DINOV3_GITHUB_REPO = os.getenv("DINOV3_GITHUB_REPO", "facebookresearch/dinov3")
 PRESET_DINOV3_DEPTHER_WEIGHTS = os.getenv("DINOV3_DEPTHER_WEIGHTS", "SYNTHMIX")
-PRESET_DINOV3_BACKBONE_WEIGHTS = os.getenv("DINOV3_BACKBONE_WEIGHTS", "")
+PRESET_DINOV3_BACKBONE_WEIGHTS = os.getenv("DINOV3_BACKBONE_WEIGHTS", "LVD1689M")
 PRESET_DINOV3_RESIZE = int(os.getenv("DINOV3_RESIZE", "896"))
 PRESET_DINOV3_MIN_DEPTH = float(os.getenv("DINOV3_MIN_DEPTH", "0.85"))
 PRESET_DINOV3_MAX_DEPTH = float(os.getenv("DINOV3_MAX_DEPTH", "1.0"))
@@ -65,15 +81,26 @@ def get_dinov3_depther(
     max_depth: float,
     use_cpu: bool,
 ):
-    depther = torch.hub.load(
-        repo_dir,
-        "dinov3_vit7b16_dd",
-        source="local",
-        pretrained=False,
-        weights=depther_weights,
-        backbone_weights=backbone_weights,
-        depth_range=(min_depth, max_depth),
-    )
+    if repo_dir:
+        depther = torch.hub.load(
+            repo_dir,
+            "dinov3_vit7b16_dd",
+            source="local",
+            pretrained=False,
+            weights=depther_weights,
+            backbone_weights=backbone_weights,
+            depth_range=(min_depth, max_depth),
+        )
+    else:
+        depther = torch.hub.load(
+            PRESET_DINOV3_GITHUB_REPO,
+            "dinov3_vit7b16_dd",
+            source="github",
+            pretrained=False,
+            weights=depther_weights,
+            backbone_weights=backbone_weights,
+            depth_range=(min_depth, max_depth),
+        )
     depther.eval()
     device = torch.device("cpu" if use_cpu or not torch.cuda.is_available() else "cuda")
     depther = depther.to(device)
@@ -104,15 +131,6 @@ def load_16bit_depth_map(path: str, scale_factor: float = PRESET_DEPTH_SCALE_FAC
 
 
 def estimate_depth_with_dinov3(image_pil: Image.Image) -> np.ndarray:
-    if not PRESET_DINOV3_REPO_DIR:
-        raise gr.Error(
-            "DINOV3_REPO_DIR not set. Set env vars DINOV3_REPO_DIR and DINOV3_BACKBONE_WEIGHTS or upload depth map."
-        )
-    if not PRESET_DINOV3_BACKBONE_WEIGHTS:
-        raise gr.Error(
-            "DINOV3_BACKBONE_WEIGHTS not set. Set it in environment or upload depth map."
-        )
-
     depther, device = get_dinov3_depther(
         repo_dir=PRESET_DINOV3_REPO_DIR,
         depther_weights=PRESET_DINOV3_DEPTHER_WEIGHTS,
@@ -231,18 +249,28 @@ def run_app(image_path, text_prompt, mode, depth_map_path, density_kg_per_m3):
         return overlay, blank, msg
 
     # Mode 2: segmentation + volume
-    # Prefer uploaded depth; otherwise run DINOv3 depth with presets.
+    # Default: compute depth using DINOv3.
+    # Upload is optional override/fallback.
     depth_error = None
-    if depth_map_path:
-        depth_map = load_16bit_depth_map(depth_map_path, PRESET_DEPTH_SCALE_FACTOR)
-        depth_source = f"Uploaded depth map: {os.path.basename(depth_map_path)}"
-    else:
-        try:
-            depth_map = estimate_depth_with_dinov3(image_pil)
-            depth_source = "DINOv3 depth inference (preset)"
-        except Exception as exc:
-            depth_map = None
-            depth_error = str(exc)
+    try:
+        depth_map = estimate_depth_with_dinov3(image_pil)
+        depth_source = (
+            f"DINOv3 depth inference ({'local repo' if PRESET_DINOV3_REPO_DIR else PRESET_DINOV3_GITHUB_REPO})"
+        )
+        if depth_map_path:
+            depth_map = load_16bit_depth_map(depth_map_path, PRESET_DEPTH_SCALE_FACTOR)
+            depth_source = f"Uploaded depth override: {os.path.basename(depth_map_path)}"
+    except Exception as exc:
+        depth_map = None
+        depth_error = str(exc)
+        if depth_map_path:
+            try:
+                depth_map = load_16bit_depth_map(depth_map_path, PRESET_DEPTH_SCALE_FACTOR)
+                depth_source = f"Uploaded depth fallback: {os.path.basename(depth_map_path)}"
+            except Exception as upload_exc:
+                depth_error = f"{depth_error} | upload failed: {upload_exc}"
+                depth_source = "Unavailable"
+        else:
             depth_source = "Unavailable"
 
     # Graceful fallback if depth is missing/unavailable
@@ -256,8 +284,8 @@ def run_app(image_path, text_prompt, mode, depth_map_path, density_kg_per_m3):
             f"- DINO for segmentation: `{PRESET_GDINO_MODEL_ID}` (GroundingDINO)\n"
             "- Volume/mass: not computed (depth not available)\n"
             "- How to fix:\n"
-            "  1. Upload aligned `*_depth_raw.png` in the depth box, or\n"
-            "  2. Configure DINOv3 depth via env vars `DINOV3_REPO_DIR` and `DINOV3_BACKBONE_WEIGHTS`.\n"
+            "  1. Allow DINOv3 model loading (internet for torch.hub or local repo), or\n"
+            "  2. Upload aligned `*_depth_raw.png` in the depth box.\n"
             f"- Depth error: `{depth_error or 'No depth provided'}`\n"
         )
         blank = np.zeros_like(image_np)
@@ -306,7 +334,7 @@ def run_app(image_path, text_prompt, mode, depth_map_path, density_kg_per_m3):
         f"- Depth source: `{depth_source}`\n"
         f"- SAM: `{PRESET_SAM_TYPE}`\n"
         f"- DINO for segmentation: `{PRESET_GDINO_MODEL_ID}` (GroundingDINO)\n"
-        f"- DINO for depth (if no upload): `dinov3_vit7b16_dd`\n"
+        f"- DINO for depth (default): `dinov3_vit7b16_dd`\n"
     )
     return overlay, heat, msg
 
@@ -326,7 +354,8 @@ Two modes only:
 Presets in this app:
 - SAM: `{PRESET_SAM_TYPE}`
 - Segmentation DINO: `{PRESET_GDINO_MODEL_ID}`
-- Depth model (when no depth upload): `dinov3_vit7b16_dd`
+- Depth model (default): `dinov3_vit7b16_dd`
+- Depth loading source: `{'local repo' if PRESET_DINOV3_REPO_DIR else PRESET_DINOV3_GITHUB_REPO}`
 """
     )
 
@@ -341,7 +370,7 @@ Presets in this app:
             )
             depth_map_path = gr.Image(
                 type="filepath",
-                label="Optional 16-bit depth map (*_depth_raw.png)",
+                label="Optional 16-bit depth map override/fallback (*_depth_raw.png)",
             )
             density_kg_per_m3 = gr.Number(value=180.0, label="Density (kg/m^3) for mass")
             run_btn = gr.Button("Run", variant="primary")

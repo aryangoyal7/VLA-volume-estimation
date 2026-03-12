@@ -66,7 +66,8 @@ It supports:
   - `Segmentation only`
   - `Segmentation + Volume`
 - prompt-based segmentation
-- volume mode via uploaded `*_depth_raw.png` (16-bit) or preset DINOv3 depth inference
+- volume mode defaults to DINOv3 depth inference
+- optional uploaded `*_depth_raw.png` (16-bit) as override/fallback
 - volume + mass estimates
 
 Optional preset env vars for DINOv3 depth mode:
@@ -75,6 +76,7 @@ Optional preset env vars for DINOv3 depth mode:
 export DINOV3_REPO_DIR=/abs/path/to/dinov3/repo
 export DINOV3_BACKBONE_WEIGHTS=/abs/path/to/dinov3_backbone.pth
 export DINOV3_DEPTHER_WEIGHTS=SYNTHMIX
+export DINOV3_GITHUB_REPO=facebookresearch/dinov3
 ```
 
 ### 2) Conversational VLA (CLI)
