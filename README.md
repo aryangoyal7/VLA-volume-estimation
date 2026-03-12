@@ -62,9 +62,20 @@ Open: `http://0.0.0.0:7861`
 
 It supports:
 
+- two modes only:
+  - `Segmentation only`
+  - `Segmentation + Volume`
 - prompt-based segmentation
-- depth via uploaded `*_depth_raw.png` (16-bit) or DINOv3 inference
+- volume mode via uploaded `*_depth_raw.png` (16-bit) or preset DINOv3 depth inference
 - volume + mass estimates
+
+Optional preset env vars for DINOv3 depth mode:
+
+```bash
+export DINOV3_REPO_DIR=/abs/path/to/dinov3/repo
+export DINOV3_BACKBONE_WEIGHTS=/abs/path/to/dinov3_backbone.pth
+export DINOV3_DEPTHER_WEIGHTS=SYNTHMIX
+```
 
 ### 2) Conversational VLA (CLI)
 
