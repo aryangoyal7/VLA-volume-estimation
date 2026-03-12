@@ -232,12 +232,36 @@ def run_app(image_path, text_prompt, mode, depth_map_path, density_kg_per_m3):
 
     # Mode 2: segmentation + volume
     # Prefer uploaded depth; otherwise run DINOv3 depth with presets.
+    depth_error = None
     if depth_map_path:
         depth_map = load_16bit_depth_map(depth_map_path, PRESET_DEPTH_SCALE_FACTOR)
         depth_source = f"Uploaded depth map: {os.path.basename(depth_map_path)}"
     else:
-        depth_map = estimate_depth_with_dinov3(image_pil)
-        depth_source = "DINOv3 depth inference (preset)"
+        try:
+            depth_map = estimate_depth_with_dinov3(image_pil)
+            depth_source = "DINOv3 depth inference (preset)"
+        except Exception as exc:
+            depth_map = None
+            depth_error = str(exc)
+            depth_source = "Unavailable"
+
+    # Graceful fallback if depth is missing/unavailable
+    if depth_map is None:
+        msg = (
+            "### Segmentation + Volume (Depth Unavailable)\n"
+            f"- Prompt: `{text_prompt}`\n"
+            f"- Detections: `{len(masks)}`\n"
+            f"- Prompt mask coverage: `{float(np.mean(union_mask)*100.0):.2f}%`\n"
+            f"- SAM: `{PRESET_SAM_TYPE}`\n"
+            f"- DINO for segmentation: `{PRESET_GDINO_MODEL_ID}` (GroundingDINO)\n"
+            "- Volume/mass: not computed (depth not available)\n"
+            "- How to fix:\n"
+            "  1. Upload aligned `*_depth_raw.png` in the depth box, or\n"
+            "  2. Configure DINOv3 depth via env vars `DINOV3_REPO_DIR` and `DINOV3_BACKBONE_WEIGHTS`.\n"
+            f"- Depth error: `{depth_error or 'No depth provided'}`\n"
+        )
+        blank = np.zeros_like(image_np)
+        return overlay, blank, msg
 
     union_mask = resize_mask_if_needed(union_mask, depth_map.shape)
     height_map, ground_depth, depth_scale = estimate_height_map(
