@@ -50,6 +50,22 @@ python app.py
 
 Open: `http://0.0.0.0:8000/gradio`
 
+### 1b) Gradio app with volume output (new)
+
+This is a separate file and does not modify the original app:
+
+```bash
+python app_volume.py
+```
+
+Open: `http://0.0.0.0:7861`
+
+It supports:
+
+- prompt-based segmentation
+- depth via uploaded `*_depth_raw.png` (16-bit) or DINOv3 inference
+- volume + mass estimates
+
 ### 2) Conversational VLA (CLI)
 
 This is the multi-turn workflow.
